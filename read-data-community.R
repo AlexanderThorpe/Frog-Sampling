@@ -24,16 +24,6 @@ expert_ground <- array(unlist(expert_list[c("CEF","EBF","GBF","NGF","SMF")]),
                      dim=c(length(expert_list[[1]]),5),dimnames=dimnames(data_ground)[-2])
 
 
-## Check how many classifications per person.
-n_class_ground <- apply(data_ground,2:3,function(x) sum(!is.na(x)))[,1] ## Same for each species.
-n_class_tree <- apply(data_tree,2:3,function(x) sum(!is.na(x)))[,1]
-keep_ground <- names(n_class_ground[n_class_ground>2])
-keep_tree <- names(n_class_tree[n_class_tree>2])
-
-## Remove people who made 5 or fewer classifications.
-data_ground <- data_ground[,keep_ground,]
-data_tree <- data_tree[,keep_tree,]
-
 ## Does it look reasonable?
 ##> apply(data_tree,3,table)
 ##      BMTF  LLJ  PTF  NTF  GSF  WTF
@@ -51,7 +41,30 @@ data_tree <- data_tree[,keep_tree,]
 ##   CEF EBF  GBF  NGF  SMF
 ##0   92 370 1133 1260   75
 ##1 1168 890  127    0 1185
- 
+
+## Check how many classifications per person.
+n_class_ground <- apply(data_ground,2:3,function(x) sum(!is.na(x)))[,1] ## Same for each species.
+n_class_tree <- apply(data_tree,2:3,function(x) sum(!is.na(x)))[,1]
+
+## Lets check how they used the "no frog" options.
+inconsistent_nofrog <- function(x) {
+    if (all(is.na(x))) return(NA) ## Empty cells.
+    bad1 = x[4] & any(x[-4]) ## none and some?
+    bad2 = !x[4] & all(!x[-4]) ## some but none?
+    return(bad1 | bad2)
+}
+
+
+## Remove some people who used it inconsistently.
+n_inconsistent_ground <- apply(apply(data_ground,1:2,inconsistent_nofrog),2,sum,na.rm=TRUE)
+n_inconsistent_tree  <- apply(apply(data_tree,1:2,inconsistent_nofrog),2,sum,na.rm=TRUE)
+
+prob_inconsistent_ground <- n_inconsistent_ground/n_class_ground
+prob_inconsistent_tree <- n_inconsistent_tree/n_class_tree
+
+## Keep people who made any classifications, unless they had >25% inconsistent.
+data_tree <- data_tree[,(n_class_tree>0)&(prob_inconsistent_tree<=.25),]
+data_ground <- data_ground[,(n_class_ground>0)&(prob_inconsistent_ground<=.25),]
+
 
 save(file="processed_data_community.RData",list=c("data_tree","data_ground","expert_tree","expert_ground"))
-

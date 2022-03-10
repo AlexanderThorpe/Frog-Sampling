@@ -1,7 +1,26 @@
 rm(list=ls())
 
-iter=1e5 ## MCMC length
-load("data/processed_data_4_frogs.RData")
+iter=5e3 ## MCMC length
+load("data/processed_data_community.RData")
+## Set this to work on the tree or ground frogs:
+frogs <- "tree"
+##frogs <- "ground"
+if (frogs=="tree") {
+    data<-data_tree[,,-4]
+    expert<-expert_tree[,-4]
+} else {
+    data<-data_ground[,,-4]
+    expert<-expert_ground[,-4]
+}
+
+## For now, I am just dropping the "no frog" data. This is because when
+## the response is none, it is almost universal that they also avoided
+## ticking any of the other frogs. But when the repsonse not-NGF, there
+## is some confusion, with quite often other frogs identified (at least
+## in the tree frog data, not so much the ground frog data). This is
+## also supported by my censoring in the read-data where I removed some
+## participants who made too many inconsistent uses of "no frog".
+
 n_species <- dim(data)[3] ## Each person coded for how many frog species?
 S <- dim(data)[2] ## How many citizen scientists?
 P <- dim(data)[1] ## How many audio clips?
@@ -10,13 +29,13 @@ ll <- function(f,d,g,data,sample=FALSE) {
     ## Calculate the probabilites of TRUE responses and log-likelihoods.
     ## Random effects d and g have length dim(data)[2]. Random effects
     ## f is a matrix dim(data)[1],dim(data)[3].
-    n_species <- dim(data)[3] ## Each person coded for how many frog species?
+    n_species <- dim(f)[2] ## Each person coded for how many frog species?
 
     ## MPT. Tree starts with frog (yes/no, f), then detect (yes/no, d),
     ## then guess (yes/no, g) if detect fails.
     all_d <- t(array(d,dim=c(length(d),nrow(f)))) ## Row-major prob d.
     all_g <- t(array(g,dim=c(length(d),nrow(f)))) ## Row-major prob g.
-    all_probs <- array(NA,dim=dim(data),dimnames=dimnames(data)) ## To store outputs.
+    all_probs <- array(NA,dim=c(nrow(f),length(d),n_species)) ## To store outputs.
     for (species in 1:n_species) {
         all_f <- array(f[,species],dim=c(nrow(f),length(d)))    ## Column-major prob of target species calling.
         all_probs[,,species] <- all_f*all_d + all_g*(1-all_d) ## Probability of "yes" coding.
@@ -49,8 +68,8 @@ mean_start <- function(x) {
 ## Start points taken from marginal means.
 f[,,1] <- apply(data,c(1,3),mean_start)
 ##d[,1] <- g[,1] <- apply(rbind(data_GBF,data_LLJ),2,mean_start)
-d[,1] <- 0.8
-g[,1] <- 0.1
+d[,1] <- 0.5
+g[,1] <- 0.5
 
 ## Uninformed start points for group level parameters. 
 group_level_parameters[,,1] <- log(c(1,2)) 
@@ -82,13 +101,15 @@ for (i in 2:iter) {
     ## Proposal for f change likelihoods only for one audio file, for one species.
     ##. So we can do acceptance on those independently.
     tmp <- prop_log_probs$p - probs$p ## Difference in log likelihoods
-    tmp <- tmp + ## Add in the difference in prior likelihood. 
-        dbeta(prop_f,shape1=cg["loga",1:n_species],shape2=cg["logb",1:n_species],log=TRUE) -
-        dbeta(f[,,i-1],shape1=cg["loga",1:n_species],shape2=cg["logb",1:n_species],log=TRUE) 
-    tmp <- runif(P*n_species) < exp(tmp) ## M-H accept
+    ## To get the difference in group dist likelihood, need to transpose so that
+    ## dim(tmp) matches cg.
+    tmp_grp <-  dbeta(t(prop_f),shape1=cg["loga",1:n_species],shape2=cg["logb",1:n_species],log=TRUE) -
+        dbeta(t(f[,,i-1]),shape1=cg["loga",1:n_species],shape2=cg["logb",1:n_species],log=TRUE)
+    tmp <- tmp + t(tmp_grp) ## Back transpose.
+    keep <- runif(P*n_species) < exp(tmp) ## M-H accept
     ## Build next vector Gibbs wise.
     f[,,i] <- f[,,i-1]
-    f[,,i][tmp] <- prop_f[tmp]
+    f[,,i][keep] <- prop_f[keep]
     
     ## SAMPLE FOR D & G.
     ## Propose new d & g vectors and calculate new log_probs from them.
@@ -111,7 +132,7 @@ for (i in 2:iter) {
     ## Proposals for d & g change likelihoods only for one subject. So we can do
     ## accpetance on those independently.
     tmp <- prop_log_probs$s - probs$s ## Difference in log likelihoods
-    tmp <- tmp + ## Prior likleihood for "d".
+    tmp <- tmp + ## Prior likelihood for "d".
         dbeta(prop_d,shape1=cg["loga","d"],shape2=cg["logb","d"],log=TRUE) -
         dbeta(d[,i-1],shape1=cg["loga","d"],shape2=cg["logb","d"],log=TRUE)
     tmp <- tmp + ## Prior likelihood for "g".
@@ -140,7 +161,7 @@ for (i in 2:iter) {
         }
         tmp <- sum(dbeta(tmp1,shape1=prop_cg["loga",j],shape2=prop_cg["logb",j],log=TRUE) -
                    dbeta(tmp1,shape1=cg["loga",j],shape2=cg["logb",j],log=TRUE)) +
-                  sum(dnorm(prop_group,mean=0,sd=3,log=TRUE)) - sum(dnorm(group_level_parameters[,,i-1],mean=0,sd=3,log=TRUE)) ## Prior.
+                  sum(dnorm(prop_group[,j],mean=0,sd=3,log=TRUE)) - sum(dnorm(group_level_parameters[,j,i-1],mean=0,sd=3,log=TRUE)) ## Prior.
         if (runif(1)<exp(tmp)) group_level_parameters[,j,i]<-prop_group[,j] ## Keep.
     }
  
@@ -148,6 +169,5 @@ for (i in 2:iter) {
     if ((i%% 100)==0) cat(" ",i)
 }
 
-save.image(file=paste0("samples-4-frogs.RData"))
-
+save.image(file=paste0(frogs,".RData"))
 
